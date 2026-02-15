@@ -31,11 +31,16 @@ async def safe_delete(path):
     try:
         if os.path.exists(path):
             os.remove(path)
-    except:
+    except OSError as e:
+        print(f"Error deleting file {path}: {e}")
         pass
 
 
 async def download_instagram(url, folder):
+    # Validate URL to prevent command injection
+    if not url.startswith(('http://', 'https://')) or 'instagram.com' not in url:
+        raise ValueError("Invalid Instagram URL")
+    
     template = f"{folder}/%(id)s_%(index)s.%(ext)s"
 
     cmd = [
@@ -48,10 +53,13 @@ async def download_instagram(url, folder):
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
-    await process.communicate()
+    stdout, stderr = await process.communicate()
+    
+    if process.returncode != 0:
+        raise RuntimeError(f"yt-dlp failed with error: {stderr.decode()}")
 
 
 async def send_file(chat_id, path):
@@ -70,6 +78,9 @@ async def send_file(chat_id, path):
             await bot.send_photo(chat_id, types.FSInputFile(path))
         else:
             await bot.send_document(chat_id, types.FSInputFile(path))
+    except Exception as e:
+        await bot.send_message(chat_id, f"❌ خطا در ارسال فایل: {str(e)}")
+        await safe_delete(path)
     finally:
         await safe_delete(path)
 
@@ -127,7 +138,11 @@ async def main():
     for _ in range(WORKERS):
         asyncio.create_task(worker())
 
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        # Graceful shutdown
+        await bot.session.close()
 
 
 if __name__ == "__main__":
